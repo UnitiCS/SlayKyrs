@@ -1,0 +1,108 @@
+﻿<Window x:Class="SLAU.Client.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="SLAU Solver" Height="600" Width="800"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Верхняя панель с настройками -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,10">
+            <GroupBox Header="Connection Settings">
+                <Grid Margin="5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Label Content="Host:" Grid.Column="0"/>
+                    <TextBox x:Name="HostTextBox" Text="localhost" Grid.Column="1" Margin="5"/>
+                    <Label Content="Port:" Grid.Column="2"/>
+                    <TextBox x:Name="PortTextBox" Text="5000" Grid.Column="3" Margin="5"/>
+                </Grid>
+            </GroupBox>
+
+            <GroupBox Header="Matrix Settings" Margin="0,10,0,0">
+                <Grid Margin="5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Label Content="Matrix Size:" Grid.Column="0"/>
+                    <TextBox x:Name="MatrixSizeTextBox" Text="1000" Grid.Column="1" Margin="5"/>
+                    <Button x:Name="GenerateMatrix" Content="Generate Random Matrix" 
+                            Click="GenerateMatrix_Click" Grid.Column="2" 
+                            Margin="5" Padding="10,5"/>
+                </Grid>
+            </GroupBox>
+        </StackPanel>
+
+        <!-- Центральная панель с результатами -->
+        <TabControl Grid.Row="1" Margin="0,10">
+            <TabItem Header="Matrix">
+                <DataGrid x:Name="MatrixGrid" 
+                         AutoGenerateColumns="True" 
+                         IsReadOnly="True" 
+                         CanUserAddRows="False"
+                         VerticalScrollBarVisibility="Auto"
+                         HorizontalScrollBarVisibility="Auto"/>
+            </TabItem>
+            <TabItem Header="Solution">
+                <DataGrid x:Name="SolutionGrid" 
+                         AutoGenerateColumns="True" 
+                         IsReadOnly="True" 
+                         CanUserAddRows="False"
+                         VerticalScrollBarVisibility="Auto"/>
+            </TabItem>
+            <TabItem Header="Log">
+                <TextBox x:Name="LogTextBox" 
+                        IsReadOnly="True" 
+                        VerticalScrollBarVisibility="Auto" 
+                        TextWrapping="Wrap"
+                        FontFamily="Consolas"/>
+            </TabItem>
+        </TabControl>
+
+        <!-- Нижняя панель с кнопками и прогрессом -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <ProgressBar x:Name="ProgressBar" 
+                        Height="20" 
+                        Margin="0,5,10,5" 
+                        Grid.Column="0"/>
+
+            <StackPanel Grid.Column="1" 
+                        Orientation="Horizontal" 
+                        HorizontalAlignment="Right">
+                <Button x:Name="SolveButton" 
+                        Content="Solve" 
+                        Click="Solve_Click" 
+                        Width="100" 
+                        Margin="5" 
+                        Padding="10,5"/>
+                <Button x:Name="ClearButton" 
+                        Content="Clear" 
+                        Click="Clear_Click" 
+                        Width="100" 
+                        Margin="5" 
+                        Padding="10,5"/>
+                <Button x:Name="CompareButton" 
+                        Content="Compare Methods" 
+                        Click="Compare_Click" 
+                        Width="120" 
+                        Margin="5" 
+                        Padding="10,5"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
