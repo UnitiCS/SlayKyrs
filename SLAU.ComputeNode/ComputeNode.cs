@@ -1,229 +1,189 @@
-﻿using System.Net.Sockets;
-using System.Text.Json;
-using System.Text;
+﻿using SLAU.Common.Logging;
 using SLAU.Common.Models;
+using SLAU.Common.Models.Commands;
+using SLAU.Common.Models.Commands.Base;
+using SLAU.Common.Models.Results;
+using SLAU.Common.Models.Results.Base;
 using SLAU.Common.Network;
-using SLAU.Common.Enums;
-using System.Collections.Concurrent;
+using System.Net.Sockets;
 
 namespace SLAU.ComputeNode;
-public class ComputeNode
+public class ComputeNode : IDisposable
 {
-    private Socket socket;
-    private readonly int nodePort;
-    private bool isRunning;
-    private readonly object lockObject = new object();
+    private readonly TcpClient _client;
+    private readonly ILogger _logger;
+    private readonly TcpConnection _connection;
+    private Matrix _localMatrix;
+    private int _startColumnIndex;
+    private int _columnCount;
+    private bool _isDisposed;
 
-    public ComputeNode(int nodePort)
+    public ComputeNode(TcpClient client, ILogger logger)
     {
-        this.nodePort = nodePort;
+        _client = client ?? throw new ArgumentNullException(nameof(client));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _connection = new TcpConnection(client, logger);
     }
 
-    public async Task StartAsync()
+    public async Task ProcessRequestsAsync()
     {
         try
         {
-            Console.WriteLine($"Initializing compute node for port {nodePort}");
-            socket = await TcpConnection.ConnectAsync("localhost", nodePort);
-            isRunning = true;
-            Console.WriteLine($"Connected to server on port {nodePort}");
-
-            while (isRunning)
+            while (_client.Connected)
             {
-                try
-                {
-                    byte[] data = await TcpConnection.ReceiveDataAsync(socket);
-
-                    if (data.Length == 4)
-                    {
-                        int commandType = BitConverter.ToInt32(data, 0);
-                        if (commandType == (int)CommandType.Shutdown)
-                        {
-                            Console.WriteLine("Received shutdown command");
-                            Stop();
-                            return;
-                        }
-                    }
-
-                    string jsonCommand = Encoding.UTF8.GetString(data);
-                    var options = new JsonSerializerOptions
-                    {
-                        WriteIndented = false,
-                        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                    };
-
-                    var command = JsonSerializer.Deserialize<RowCommand>(jsonCommand, options);
-
-                    if (command == null)
-                    {
-                        throw new Exception("Deserialized command is null");
-                    }
-
-                    switch (command.Command)
-                    {
-                        case (int)CommandType.ProcessRows:
-                            Console.WriteLine($"Processing columns: {string.Join(", ", command.ColumnIndices)}");
-                            await ProcessColumnsCommand(socket, command);
-                            break;
-
-                        case (int)CommandType.Synchronize:
-                            await ProcessSynchronizeCommand(socket, command);
-                            break;
-
-                        default:
-                            throw new Exception($"Unknown command type: {command.Command}");
-                    }
-                }
-                catch (Exception ex) when (!isRunning)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error processing command: {ex.Message}");
-                    if (!socket.Connected)
-                    {
-                        Console.WriteLine("Lost connection to server");
-                        break;
-                    }
-                }
+                var command = await _connection.ReceiveAsync<CommandBase>();
+                var result = await ProcessCommandAsync(command);
+                await _connection.SendAsync(result);
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error in compute node: {ex.Message}");
-            throw;
-        }
-        finally
-        {
-            socket?.Close();
-            Console.WriteLine("Compute node stopped");
+            _logger.LogError($"Error processing requests: {ex.Message}");
         }
     }
 
-    private async Task ProcessColumnsCommand(Socket clientSocket, RowCommand command)
+    private async Task<BaseResult> ProcessCommandAsync(CommandBase command)
     {
         try
         {
-            Console.WriteLine($"Processing columns below row {command.PivotRow}");
-            Console.WriteLine($"Assigned columns: {string.Join(", ", command.ColumnIndices)}");
-
-            var result = new RowResult
+            switch (command)
             {
-                Command = (int)CommandType.RowsProcessed,
-                ProcessedColumns = command.ColumnIndices,
-                ColumnData = new double[command.ColumnData.Length],
-                Constants = new double[command.MatrixSize]
-            };
-
-            // Копируем исходные данные
-            Array.Copy(command.ColumnData, result.ColumnData, command.ColumnData.Length);
-            Array.Copy(command.Constants, result.Constants, command.Constants.Length);
-
-            // Параллельная обработка назначенных столбцов
-            int processorCount = Environment.ProcessorCount;
-            int optimalThreadCount = Math.Min(processorCount * 2, command.ColumnIndices.Length);
-
-            var partitioner = Partitioner.Create(0, command.ColumnIndices.Length);
-
-            await Task.Run(() =>
-            {
-                Parallel.ForEach(partitioner, new ParallelOptions { MaxDegreeOfParallelism = optimalThreadCount },
-                    range =>
-                    {
-                        for (int colIndex = range.Item1; colIndex < range.Item2; colIndex++)
-                        {
-                            ProcessColumn(colIndex, command, result);
-                        }
-                    });
-            });
-
-            var options = new JsonSerializerOptions
-            {
-                WriteIndented = false,
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            };
-
-            string jsonResult = JsonSerializer.Serialize(result, options);
-            await TcpConnection.SendDataAsync(clientSocket, Encoding.UTF8.GetBytes(jsonResult));
-
-            Console.WriteLine($"Processed columns: {string.Join(", ", command.ColumnIndices)}");
+                case ColumnInitCommand init:
+                    return await InitializeColumnsAsync(init);
+                case ColumnCommand col:
+                    return await ProcessColumnAsync(col);
+                case SwapCommand swap:
+                    return await ProcessSwapAsync(swap);
+                case EliminationCommand elim:
+                    return await ProcessEliminationAsync(elim);
+                case ElementCommand elem:
+                    return await ProcessElementAsync(elem);
+                default:
+                    throw new InvalidOperationException($"Unknown command type: {command.GetType().Name}");
+            }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error processing columns: {ex.Message}");
-            throw;
+            _logger.LogError($"Error processing command {command.GetType().Name}: {ex.Message}");
+            return new BaseResult { IsSuccess = false, ErrorMessage = ex.Message };
         }
     }
 
-    private void ProcessColumn(int colIndex, RowCommand command, RowResult result)
+    private async Task<ColumnResult> InitializeColumnsAsync(ColumnInitCommand command)
     {
-        int currentCol = command.ColumnIndices[colIndex];
-
-        // Обрабатываем только столбцы, начиная с ведущего
-        if (currentCol >= command.PivotRow)
+        return await Task.Run(() =>
         {
-            // Обрабатываем элементы столбца ниже ведущей строки
-            for (int i = command.PivotRow + 1; i < command.MatrixSize; i++)
+            _startColumnIndex = command.ColumnIndex;
+            _columnCount = command.ColumnData.Length / command.FreeTerms.Length;
+
+            _localMatrix = new Matrix(command.FreeTerms.Length, _columnCount);
+
+            // Заполнение локальной матрицы данными
+            for (int i = 0; i < command.FreeTerms.Length; i++)
             {
-                // Вычисляем множитель
-                double factor = command.PivotColumn[i] / command.PivotValue;
-
-                // Обновляем элемент в столбце
-                result.ColumnData[colIndex * command.MatrixSize + i] =
-                    command.ColumnData[colIndex * command.MatrixSize + i] -
-                    factor * command.ColumnData[colIndex * command.MatrixSize + command.PivotRow];
-
-                // Обновляем константы только если это последний столбец
-                if (currentCol == command.MatrixSize - 1)
+                for (int j = 0; j < _columnCount; j++)
                 {
-                    result.Constants[i] = command.Constants[i] - factor * command.PivotConstant;
+                    _localMatrix[i, j] = command.ColumnData[i * _columnCount + j];
+                }
+                _localMatrix.SetFreeTerm(i, command.FreeTerms[i]);
+            }
+
+            return new ColumnResult
+            {
+                IsSuccess = true,
+                ColumnIndex = _startColumnIndex,
+                ColumnData = command.ColumnData,
+                FreeTerms = command.FreeTerms
+            };
+        });
+    }
+
+    private async Task<ColumnResult> ProcessColumnAsync(ColumnCommand command)
+    {
+        return await Task.Run(() =>
+        {
+            var result = new ColumnResult
+            {
+                ColumnIndex = command.ColumnIndex,
+                ColumnData = new double[_localMatrix.Rows],
+                FreeTerms = new double[_localMatrix.Rows]
+            };
+
+            for (int i = 0; i < _localMatrix.Rows; i++)
+            {
+                result.ColumnData[i] = _localMatrix[i, command.ColumnIndex - _startColumnIndex];
+                result.FreeTerms[i] = _localMatrix.GetFreeTerm(i);
+            }
+
+            return result;
+        });
+    }
+
+    private async Task<BaseResult> ProcessSwapAsync(SwapCommand command)
+    {
+        return await Task.Run(() =>
+        {
+            _localMatrix.SwapRows(command.Row1, command.Row2);
+            return new BaseResult { IsSuccess = true };
+        });
+    }
+
+    private async Task<BaseResult> ProcessEliminationAsync(EliminationCommand command)
+    {
+        return await Task.Run(() =>
+        {
+            int pivotRow = command.PivotRow;
+            double pivotElement = _localMatrix[pivotRow, 0];
+
+            for (int i = 0; i < _localMatrix.Rows; i++)
+            {
+                if (i != pivotRow)
+                {
+                    double factor = _localMatrix[i, 0] / pivotElement;
+                    for (int j = 0; j < _localMatrix.Columns; j++)
+                    {
+                        _localMatrix[i, j] -= factor * _localMatrix[pivotRow, j];
+                    }
+                    _localMatrix.SetFreeTerm(i, _localMatrix.GetFreeTerm(i) -
+                        factor * _localMatrix.GetFreeTerm(pivotRow));
                 }
             }
-        }
+
+            return new BaseResult { IsSuccess = true };
+        });
     }
 
-    private async Task ProcessSynchronizeCommand(Socket clientSocket, RowCommand command)
+    private async Task<ElementResult> ProcessElementAsync(ElementCommand command)
     {
-        try
+        return await Task.Run(() =>
         {
-            var result = new RowResult
+            int localColumn = command.Column - _startColumnIndex;
+            if (localColumn >= 0 && localColumn < _columnCount)
             {
-                Command = (int)CommandType.Synchronize
-            };
+                return new ElementResult
+                {
+                    Row = command.Row,
+                    Column = command.Column,
+                    Value = _localMatrix[command.Row, localColumn]
+                };
+            }
 
-            var options = new JsonSerializerOptions
+            return new ElementResult
             {
-                WriteIndented = false,
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                Row = command.Row,
+                Column = command.Column,
+                Value = 0
             };
-
-            string jsonResult = JsonSerializer.Serialize(result, options);
-            await TcpConnection.SendDataAsync(clientSocket, Encoding.UTF8.GetBytes(jsonResult));
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error processing synchronize command: {ex.Message}");
-            throw;
-        }
+        });
     }
 
-    public void Stop()
+    public void Dispose()
     {
-        lock (lockObject)
-        {
-            if (!isRunning) return;
+        if (_isDisposed)
+            return;
 
-            isRunning = false;
-            try
-            {
-                socket?.Close();
-                Console.WriteLine("Compute node stopped");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error stopping compute node: {ex.Message}");
-            }
-        }
+        _connection?.Dispose();
+        _client?.Dispose();
+        _isDisposed = true;
     }
 }

@@ -1,12 +1,13 @@
-﻿using System;
-
-namespace SLAU.Common.Enums;
+﻿namespace SLAU.Common.Enums;
 public enum CommandType
 {
-    ProcessRows = 1,
-    RowsProcessed = 2,
-    Shutdown = 3,
-    Synchronize = 4,
-    LinearSolve = 5  
+    InitNodes,
+    ColumnInit,
+    Column,
+    Swap,
+    Elimination,
+    Sync,
+    Element,
+    Complete,
+    Matrix
 }
-

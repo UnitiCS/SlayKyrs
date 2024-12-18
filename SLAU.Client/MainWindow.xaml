@@ -1,108 +1,114 @@
 ﻿<Window x:Class="SLAU.Client.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="SLAU Solver" Height="600" Width="800"
+        Title="SLAU Solver" Height="600" Width="1000"
         WindowStartupLocation="CenterScreen">
     <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Верхняя панель с настройками -->
-        <StackPanel Grid.Row="0" Margin="0,0,0,10">
-            <GroupBox Header="Connection Settings">
-                <Grid Margin="5">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <Label Content="Host:" Grid.Column="0"/>
-                    <TextBox x:Name="HostTextBox" Text="localhost" Grid.Column="1" Margin="5"/>
-                    <Label Content="Port:" Grid.Column="2"/>
-                    <TextBox x:Name="PortTextBox" Text="5000" Grid.Column="3" Margin="5"/>
-                </Grid>
-            </GroupBox>
-
-            <GroupBox Header="Matrix Settings" Margin="0,10,0,0">
-                <Grid Margin="5">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <Label Content="Matrix Size:" Grid.Column="0"/>
-                    <TextBox x:Name="MatrixSizeTextBox" Text="1000" Grid.Column="1" Margin="5"/>
-                    <Button x:Name="GenerateMatrix" Content="Generate Random Matrix" 
-                            Click="GenerateMatrix_Click" Grid.Column="2" 
-                            Margin="5" Padding="10,5"/>
-                </Grid>
-            </GroupBox>
+        <!-- Панель управления -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="Количество узлов:" VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <TextBox x:Name="NodesCountTextBox" Width="60" Margin="0,0,10,0" Text="3"/>
+            <Button x:Name="InitNodesButton" Content="Инициализировать узлы" Width="150" Margin="0,0,10,0" Click="InitNodesButton_Click"/>
+            <TextBlock Text="Размер матрицы:" VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <TextBox x:Name="MatrixSizeTextBox" Width="60" Margin="0,0,10,0" Text="3"/>
+            <Button x:Name="GenerateButton" Content="Сгенерировать" Width="100" Margin="0,0,10,0" Click="GenerateButton_Click"/>
+            <Button x:Name="LoadButton" Content="Загрузить" Width="100" Margin="0,0,10,0" Click="LoadButton_Click"/>
+            <Button x:Name="SaveButton" Content="Сохранить" Width="100" Click="SaveButton_Click"/>
         </StackPanel>
 
-        <!-- Центральная панель с результатами -->
-        <TabControl Grid.Row="1" Margin="0,10">
-            <TabItem Header="Matrix">
-                <DataGrid x:Name="MatrixGrid" 
-                         AutoGenerateColumns="True" 
-                         IsReadOnly="True" 
-                         CanUserAddRows="False"
-                         VerticalScrollBarVisibility="Auto"
-                         HorizontalScrollBarVisibility="Auto"/>
-            </TabItem>
-            <TabItem Header="Solution">
-                <DataGrid x:Name="SolutionGrid" 
-                         AutoGenerateColumns="True" 
-                         IsReadOnly="True" 
-                         CanUserAddRows="False"
-                         VerticalScrollBarVisibility="Auto"/>
-            </TabItem>
-            <TabItem Header="Log">
-                <TextBox x:Name="LogTextBox" 
-                        IsReadOnly="True" 
-                        VerticalScrollBarVisibility="Auto" 
-                        TextWrapping="Wrap"
-                        FontFamily="Consolas"/>
-            </TabItem>
-        </TabControl>
-
-        <!-- Нижняя панель с кнопками и прогрессом -->
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
-            <ProgressBar x:Name="ProgressBar" 
-                        Height="20" 
-                        Margin="0,5,10,5" 
-                        Grid.Column="0"/>
+            <!-- Матрица -->
+            <DataGrid x:Name="MatrixGrid" 
+              AutoGenerateColumns="False"
+              CanUserAddRows="False"
+              CanUserDeleteRows="False"
+              CanUserReorderColumns="False"
+              CanUserResizeColumns="True"
+              CanUserResizeRows="False"
+              CanUserSortColumns="False"
+              HeadersVisibility="All"
+              GridLinesVisibility="All"
+              RowHeaderWidth="50"
+              Margin="0,0,10,0"
+              HorizontalGridLinesBrush="LightGray"
+              VerticalGridLinesBrush="LightGray"
+              Background="White"
+              AlternatingRowBackground="#F5F5F5">
+                <DataGrid.Resources>
+                    <Style TargetType="DataGridCell">
+                        <Setter Property="TextBlock.TextAlignment" Value="Right"/>
+                        <Setter Property="Padding" Value="5,2"/>
+                    </Style>
+                </DataGrid.Resources>
+            </DataGrid>
 
-            <StackPanel Grid.Column="1" 
-                        Orientation="Horizontal" 
-                        HorizontalAlignment="Right">
-                <Button x:Name="SolveButton" 
-                        Content="Solve" 
-                        Click="Solve_Click" 
-                        Width="100" 
-                        Margin="5" 
-                        Padding="10,5"/>
-                <Button x:Name="ClearButton" 
-                        Content="Clear" 
-                        Click="Clear_Click" 
-                        Width="100" 
-                        Margin="5" 
-                        Padding="10,5"/>
-                <Button x:Name="CompareButton" 
-                        Content="Compare Methods" 
-                        Click="Compare_Click" 
-                        Width="120" 
-                        Margin="5" 
-                        Padding="10,5"/>
-            </StackPanel>
+            <!-- Свободные члены -->
+            <DataGrid x:Name="FreeTermsGrid"
+              Grid.Column="1"
+              Width="100"
+              AutoGenerateColumns="False"
+              CanUserAddRows="False"
+              CanUserDeleteRows="False"
+              CanUserReorderColumns="False"
+              CanUserResizeColumns="True"
+              CanUserResizeRows="False"
+              CanUserSortColumns="False"
+              HeadersVisibility="All"
+              GridLinesVisibility="All"
+              RowHeaderWidth="50"
+              HorizontalGridLinesBrush="LightGray"
+              VerticalGridLinesBrush="LightGray"
+              Background="White"
+              AlternatingRowBackground="#F5F5F5">
+                <DataGrid.Resources>
+                    <Style TargetType="DataGridCell">
+                        <Setter Property="TextBlock.TextAlignment" Value="Right"/>
+                        <Setter Property="Padding" Value="5,2"/>
+                    </Style>
+                </DataGrid.Resources>
+            </DataGrid>
+        </Grid>
+
+        <!-- Кнопки решения -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10">
+            <Button x:Name="SolveButton" Content="Решить" Width="100" Margin="0,0,10,0" Click="SolveButton_Click"/>
+            <Button x:Name="ClearButton" Content="Очистить" Width="100" Click="ClearButton_Click"/>
+        </StackPanel>
+
+        <!-- Результаты -->
+        <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <GroupBox Header="Результат" Margin="0,0,5,0">
+                <TextBox x:Name="ResultTextBox" 
+                         IsReadOnly="True" 
+                         TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto"
+                         Height="100"/>
+            </GroupBox>
+
+            <GroupBox Header="Статистика" Grid.Column="1" Margin="5,0,0,0">
+                <TextBox x:Name="StatsTextBox" 
+                         IsReadOnly="True" 
+                         TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto"
+                         Height="100"/>
+            </GroupBox>
         </Grid>
     </Grid>
 </Window>

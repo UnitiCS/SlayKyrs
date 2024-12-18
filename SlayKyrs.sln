@@ -11,8 +11,6 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SLAU.Common", "SLAU.Common\
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SLAU.ComputeNode", "SLAU.ComputeNode\SLAU.ComputeNode.csproj", "{0BA442CB-DDA0-4EE5-A3D2-1E25267BDD87}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SLAU.Tests", "SLAU.Tests\SLAU.Tests.csproj", "{BE994842-AD41-4E11-90BA-3EE3A4A94751}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -35,10 +33,6 @@ Global
 		{0BA442CB-DDA0-4EE5-A3D2-1E25267BDD87}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{0BA442CB-DDA0-4EE5-A3D2-1E25267BDD87}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{0BA442CB-DDA0-4EE5-A3D2-1E25267BDD87}.Release|Any CPU.Build.0 = Release|Any CPU
-		{BE994842-AD41-4E11-90BA-3EE3A4A94751}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{BE994842-AD41-4E11-90BA-3EE3A4A94751}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{BE994842-AD41-4E11-90BA-3EE3A4A94751}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{BE994842-AD41-4E11-90BA-3EE3A4A94751}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

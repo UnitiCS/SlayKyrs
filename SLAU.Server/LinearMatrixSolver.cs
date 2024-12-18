@@ -1,106 +1,134 @@
-﻿using SLAU.Common.Models;
+﻿using SLAU.Common.Logging;
+using SLAU.Common.Models;
+using SLAU.Common.Performance;
 
 namespace SLAU.Server;
 public class LinearMatrixSolver
 {
-    public Matrix Solve(Matrix matrix)
+    private readonly ILogger _logger;
+    private readonly PerformanceMonitor _performanceMonitor;
+
+    public LinearMatrixSolver(ILogger logger, PerformanceMonitor performanceMonitor)
     {
-        Console.WriteLine("\n=== Starting Linear Gaussian Elimination ===");
-        int n = matrix.Size;
-        Matrix result = matrix.Clone();
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _performanceMonitor = performanceMonitor ?? throw new ArgumentNullException(nameof(performanceMonitor));
+    }
 
-        try
+    public async Task<double[]> SolveAsync(Matrix matrix)
+    {
+        return await Task.Run(() =>
         {
-            // Масштабирование матрицы
-            double[] rowScales = new double[n];
-            for (int i = 0; i < n; i++)
+            try
             {
-                double maxInRow = 0;
-                for (int j = 0; j < n; j++)
+                _performanceMonitor.StartMeasurement("linear_gauss");
+                var result = new double[matrix.Rows];
+                var augmentedMatrix = CreateAugmentedMatrix(matrix);
+
+                // Прямой ход метода Гаусса
+                for (int i = 0; i < matrix.Rows; i++)
                 {
-                    maxInRow = Math.Max(maxInRow, Math.Abs(result[i, j]));
-                }
-                if (maxInRow > 0)
-                {
-                    rowScales[i] = 1.0 / maxInRow;
-                    for (int j = 0; j < n; j++)
+                    // Поиск максимального элемента в столбце
+                    int maxRow = FindMaxElementRow(augmentedMatrix, i, matrix.Rows);
+                    if (Math.Abs(augmentedMatrix[maxRow, i]) < 1e-10)
                     {
-                        result[i, j] *= rowScales[i];
+                        throw new InvalidOperationException("Matrix is singular");
                     }
-                    result.SetConstant(i, result.GetConstant(i) * rowScales[i]);
-                }
-            }
 
-            // Прямой ход
-            for (int k = 0; k < n - 1; k++)
-            {
-                if (k % 1000 == 0)
-                {
-                    Console.WriteLine($"Linear method: step {k + 1}/{n - 1}");
-                }
-
-                int maxRow = k;
-                double maxVal = Math.Abs(result[k, k]);
-                for (int i = k + 1; i < n; i++)
-                {
-                    double absVal = Math.Abs(result[i, k]);
-                    if (absVal > maxVal)
+                    // Обмен строк
+                    if (maxRow != i)
                     {
-                        maxVal = absVal;
-                        maxRow = i;
+                        SwapRows(augmentedMatrix, i, maxRow);
                     }
+
+                    // Нормализация строки
+                    NormalizeRow(augmentedMatrix, i, matrix.Columns);
+
+                    // Исключение переменной из остальных уравнений
+                    EliminateVariable(augmentedMatrix, i, matrix.Rows, matrix.Columns);
                 }
 
-                if (maxRow != k)
+                // Обратный ход
+                for (int i = matrix.Rows - 1; i >= 0; i--)
                 {
-                    result.SwapRows(k, maxRow);
-                    double tempScale = rowScales[k];
-                    rowScales[k] = rowScales[maxRow];
-                    rowScales[maxRow] = tempScale;
+                    result[i] = augmentedMatrix[i, matrix.Columns];
                 }
 
-                if (Math.Abs(result[k, k]) < 1e-12)
-                {
-                    throw new Exception($"Matrix is numerically singular at step {k}");
-                }
-
-                for (int i = k + 1; i < n; i++)
-                {
-                    double factor = result[i, k] / result[k, k];
-                    for (int j = k; j < n; j++)
-                    {
-                        result[i, j] -= factor * result[k, j];
-                    }
-                    result.SetConstant(i, result.GetConstant(i) - factor * result.GetConstant(k));
-                }
+                _performanceMonitor.StopMeasurement("linear_gauss");
+                return result;
             }
-
-            // Обратный ход
-            for (int i = n - 1; i >= 0; i--)
+            catch (Exception ex)
             {
-                double sum = 0;
-                for (int j = i + 1; j < n; j++)
-                {
-                    sum += result[i, j] * result.GetConstant(j);
-                }
-                result.SetConstant(i, (result.GetConstant(i) - sum) / result[i, i]);
+                _logger.LogError($"Error in linear solver: {ex.Message}");
+                throw;
             }
+        });
+    }
 
-            // Восстановление масштаба
-            for (int i = 0; i < n; i++)
+    private double[,] CreateAugmentedMatrix(Matrix matrix)
+    {
+        var augmented = new double[matrix.Rows, matrix.Columns + 1];
+
+        for (int i = 0; i < matrix.Rows; i++)
+        {
+            for (int j = 0; j < matrix.Columns; j++)
             {
-                if (rowScales[i] > 0)
-                {
-                    result.SetConstant(i, result.GetConstant(i) / rowScales[i]);
-                }
+                augmented[i, j] = matrix[i, j];
             }
-
-            return result;
+            augmented[i, matrix.Columns] = matrix.GetFreeTerm(i);
         }
-        catch (Exception ex)
+
+        return augmented;
+    }
+
+    private int FindMaxElementRow(double[,] matrix, int col, int rowCount)
+    {
+        int maxRow = col;
+        double maxValue = Math.Abs(matrix[col, col]);
+
+        for (int i = col + 1; i < rowCount; i++)
         {
-            Console.WriteLine($"Error in linear solver: {ex.Message}");
-            throw;
+            if (Math.Abs(matrix[i, col]) > maxValue)
+            {
+                maxValue = Math.Abs(matrix[i, col]);
+                maxRow = i;
+            }
+        }
+
+        return maxRow;
+    }
+
+    private void SwapRows(double[,] matrix, int row1, int row2)
+    {
+        int cols = matrix.GetLength(1);
+        for (int j = 0; j < cols; j++)
+        {
+            double temp = matrix[row1, j];
+            matrix[row1, j] = matrix[row2, j];
+            matrix[row2, j] = temp;
+        }
+    }
+
+    private void NormalizeRow(double[,] matrix, int row, int cols)
+    {
+        double pivot = matrix[row, row];
+        for (int j = row; j <= cols; j++)
+        {
+            matrix[row, j] /= pivot;
+        }
+    }
+
+    private void EliminateVariable(double[,] matrix, int row, int rowCount, int colCount)
+    {
+        for (int i = 0; i < rowCount; i++)
+        {
+            if (i != row)
+            {
+                double factor = matrix[i, row];
+                for (int j = row; j <= colCount; j++)
+                {
+                    matrix[i, j] -= factor * matrix[row, j];
+                }
+            }
         }
     }
 }

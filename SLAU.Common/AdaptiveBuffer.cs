@@ -1,25 +1,40 @@
 ﻿namespace SLAU.Common;
-public static class AdaptiveBuffer
+public class AdaptiveBuffer
 {
-    private const int MIN_BUFFER_SIZE = 100;
-    private const int MAX_BUFFER_SIZE = 50000;
-    private const int MEMORY_THRESHOLD_MB = 1024; // 1 GB
+    private byte[] _buffer;
+    private const int InitialSize = 1024;
+    private const int MaxSize = 1024 * 1024 * 100; // 100 MB
 
-    public static int CalculateBufferSize(int matrixSize)
+    public byte[] Buffer => _buffer;
+
+    public AdaptiveBuffer()
     {
-        // Получаем доступную память
-        var availableMemoryMB = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / (1024 * 1024);
+        _buffer = new byte[InitialSize];
+    }
 
-        // Вычисляем размер одной строки матрицы (в байтах)
-        long bytesPerRow = matrixSize * sizeof(double);
+    public void EnsureCapacity(int required)
+    {
+        if (required <= _buffer.Length)
+            return;
 
-        // Вычисляем оптимальный размер буфера
-        int optimalSize = (int)Math.Min(
-            matrixSize,
-            (MEMORY_THRESHOLD_MB * 1024 * 1024) / bytesPerRow
-        );
+        int newSize = _buffer.Length;
+        while (newSize < required)
+        {
+            newSize *= 2;
+            if (newSize > MaxSize)
+                throw new System.InvalidOperationException($"Required buffer size {required} exceeds maximum allowed size of {MaxSize} bytes");
+        }
 
-        // Ограничиваем размер буфера
-        return Math.Clamp(optimalSize, MIN_BUFFER_SIZE, MAX_BUFFER_SIZE);
+        byte[] newBuffer = new byte[newSize];
+        System.Buffer.BlockCopy(_buffer, 0, newBuffer, 0, _buffer.Length);
+        _buffer = newBuffer;
+    }
+
+    public void Reset()
+    {
+        if (_buffer.Length > InitialSize)
+        {
+            _buffer = new byte[InitialSize];
+        }
     }
 }

@@ -1,328 +1,406 @@
-﻿using System.Windows;
-using System.Collections.ObjectModel;
-using System.ComponentModel;
-using System.Windows.Controls;
+﻿using Microsoft.Win32;
+using SLAU.Common.Logging;
 using SLAU.Common.Models;
-using System.Windows.Threading;
-using SLAU.Common.Performance;
+using System.Collections.ObjectModel;
+using System.Globalization;
+using System.IO;
+using System.Text;
+using System.Windows;
+using System.Windows.Controls;
 
 namespace SLAU.Client;
 public partial class MainWindow : Window
 {
-    private Client client;
-    private Matrix currentMatrix;
-    private Matrix solution;
-    private bool isSolving;
-    private ObservableCollection<MatrixRow> matrixData;
-    private ObservableCollection<SolutionRow> solutionData;
-    private readonly DispatcherTimer statusTimer;
+    private readonly Client _client;
+    private readonly ILogger _logger;
+    private ObservableCollection<ObservableCollection<string>> _matrixData;
+    private ObservableCollection<string> _freeTermsData;
 
     public MainWindow()
     {
         InitializeComponent();
-
-        matrixData = new ObservableCollection<MatrixRow>();
-        solutionData = new ObservableCollection<SolutionRow>();
-        MatrixGrid.ItemsSource = matrixData;
-        SolutionGrid.ItemsSource = solutionData;
-
-        // Инициализация таймера для обновления статуса
-        statusTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(100)
-        };
-        statusTimer.Tick += StatusTimer_Tick;
-
-        UpdateUIState();
+        _logger = new ConsoleLogger();
+        _client = new Client("localhost", 5000, _logger);
+        InitializeGrids();
     }
 
-    private async void Solve_Click(object sender, RoutedEventArgs e)
+    private void InitializeGrids()
     {
-        if (isSolving)
-        {
-            MessageBox.Show("Solution is already in progress!", "Warning",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
+        _matrixData = new ObservableCollection<ObservableCollection<string>>();
+        _freeTermsData = new ObservableCollection<string>();
+        MatrixGrid.ItemsSource = _matrixData;
+        FreeTermsGrid.ItemsSource = _freeTermsData;
+    }
 
-        if (currentMatrix == null)
+    private async void InitNodesButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!int.TryParse(NodesCountTextBox.Text, out int nodeCount) || nodeCount <= 0)
         {
-            MessageBox.Show("Please generate a matrix first!", "Warning",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("Введите корректное количество узлов (больше 0)", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
 
         try
         {
-            isSolving = true;
-            UpdateUIState();
-            ProgressBar.IsIndeterminate = true;
-            statusTimer.Start();
-
-            LogMessage("Starting solution process...");
-
-            string host = HostTextBox.Text;
-            if (!int.TryParse(PortTextBox.Text, out int port))
-            {
-                throw new ArgumentException("Invalid port number");
-            }
-
-            client = new Client(host, port);
-            LogMessage($"Connecting to server at {host}:{port}...");
-
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            solution = await Task.Run(() => client.SolveSystemAsync(currentMatrix));
-            sw.Stop();
-
-            LogMessage($"Solution completed in {sw.ElapsedMilliseconds}ms");
-
-            DisplaySolution();
-
-            MessageBox.Show("Solution completed successfully!",
-                "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+            SetControlsEnabled(false);
+            await _client.InitializeNodesAsync(nodeCount);
+            MessageBox.Show($"Успешно инициализировано {nodeCount} узлов", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            LogMessage($"Error: {ex.Message}");
-            MessageBox.Show($"Error occurred: {ex.Message}",
-                "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"Ошибка при инициализации узлов: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
-            isSolving = false;
-            ProgressBar.IsIndeterminate = false;
-            statusTimer.Stop();
-            UpdateUIState();
+            SetControlsEnabled(true);
         }
     }
 
-    private void GenerateMatrix_Click(object sender, RoutedEventArgs e)
+    private void GenerateButton_Click(object sender, RoutedEventArgs e)
     {
-        try
+        if (!int.TryParse(MatrixSizeTextBox.Text, out int size) || size <= 0 || size > 50000)
         {
-            if (!int.TryParse(MatrixSizeTextBox.Text, out int size))
-            {
-                MessageBox.Show("Please enter a valid matrix size!", "Error",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-
-            if (size <= 0 || size > 50000)
-            {
-                MessageBox.Show("Matrix size must be between 1 and 50000!", "Error",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-
-            LogMessage($"Generating random matrix of size {size}x{size}...");
-            currentMatrix = Client.GenerateRandomMatrix(size);
-            DisplayMatrix();
-            LogMessage("Matrix generated successfully.");
-
-            // Явно вызываем обновление состояния UI
-            UpdateUIState();
-        }
-        catch (Exception ex)
-        {
-            LogMessage($"Error generating matrix: {ex.Message}");
-            MessageBox.Show($"Error generating matrix: {ex.Message}", "Error",
-                MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private async void Compare_Click(object sender, RoutedEventArgs e)
-    {
-        if (currentMatrix == null)
-        {
-            MessageBox.Show("Please generate a matrix first!", "Warning",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("Введите корректный размер матрицы (1-50000)", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
 
         try
         {
-            CompareButton.IsEnabled = false;
-            ProgressBar.IsIndeterminate = true;
+            SetControlsEnabled(false);
+            GenerateRandomMatrix(size);
+            UpdateMatrixDisplay();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Ошибка при генерации матрицы: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            SetControlsEnabled(true);
+        }
+    }
 
-            LogMessage("\n=== Starting Performance Comparison ===");
-            LogMessage($"Matrix size: {currentMatrix.Size}x{currentMatrix.Size}");
+    private async void SolveButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ValidateMatrixData())
+            return;
 
-            var result = await client.CompareMethodsAsync(currentMatrix);
+        try
+        {
+            SetControlsEnabled(false);
+            var matrix = CreateMatrixFromGrids();
 
-            LogMessage("\n=== Detailed Results ===");
-            LogMessage($"Matrix size: {result.MatrixSize}x{result.MatrixSize}");
-            LogMessage($"Linear method time: {result.LinearTime}ms");
-            LogMessage($"Distributed method time: {result.DistributedTime}ms");
+            ResultTextBox.Text = "Решение...";
+            StatsTextBox.Text = "Вычисление...";
 
-            if (result.Speedup > 1)
+            var (solution, stats) = await _client.SolveAsync(matrix);
+            DisplayResults(solution, stats);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Ошибка при решении: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            ResultTextBox.Text = "Ошибка вычисления";
+            StatsTextBox.Text = ex.Message;
+        }
+        finally
+        {
+            SetControlsEnabled(true);
+        }
+    }
+
+    private async void LoadButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Filter = "Matrix files (*.mtx)|*.mtx|All files (*.*)|*.*",
+            Title = "Загрузить матрицу"
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            try
             {
-                LogMessage($"Speedup achieved: {result.Speedup:F2}x");
-                LogMessage($"Performance improvement: {((result.Speedup - 1) * 100):F1}%");
-                LogMessage($"Time saved: {result.LinearTime - result.DistributedTime}ms");
+                SetControlsEnabled(false);
+                await LoadMatrixFromFile(dialog.FileName);
+                UpdateMatrixDisplay();
             }
-            else
+            catch (Exception ex)
             {
-                LogMessage($"Performance decrease: {(1 / result.Speedup):F2}x slower");
-                LogMessage($"Additional overhead: {result.DistributedTime - result.LinearTime}ms");
+                MessageBox.Show($"Ошибка при загрузке файла: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
             }
-
-            LogMessage($"\nSolution accuracy:");
-            LogMessage($"Solutions match: {result.SolutionsMatch}");
-            LogMessage($"Maximum error: {result.MaxError:E6}");
-
-            if (result.ErrorDistribution.Any())
+            finally
             {
-                LogMessage("\nError distribution:");
-                var percentiles = new[] { 50, 90, 95, 99 };
-                var sortedErrors = result.ErrorDistribution.Values.OrderBy(x => x).ToList();
-                foreach (var p in percentiles)
+                SetControlsEnabled(true);
+            }
+        }
+    }
+
+    private async void SaveButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ValidateMatrixData())
+            return;
+
+        var dialog = new SaveFileDialog
+        {
+            Filter = "Matrix files (*.mtx)|*.mtx|All files (*.*)|*.*",
+            Title = "Сохранить матрицу"
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            try
+            {
+                SetControlsEnabled(false);
+                await SaveMatrixToFile(dialog.FileName);
+                MessageBox.Show("Матрица успешно сохранена", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при сохранении файла: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                SetControlsEnabled(true);
+            }
+        }
+    }
+
+    private void ClearButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            _matrixData.Clear();
+            _freeTermsData.Clear();
+            ResultTextBox.Clear();
+            StatsTextBox.Clear();
+            MatrixGrid.Columns.Clear();
+            FreeTermsGrid.Columns.Clear();
+            UpdateMatrixDisplay();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Ошибка при очистке данных: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void GenerateRandomMatrix(int size)
+    {
+        var random = new Random();
+        _matrixData.Clear();
+        _freeTermsData.Clear();
+
+        // Генерация матрицы с контролируемыми значениями
+        for (int i = 0; i < size; i++)
+        {
+            var row = new ObservableCollection<string>();
+            double diagonalElement = random.NextDouble() * 10 + 10; // Диагональные элементы от 10 до 20
+
+            for (int j = 0; j < size; j++)
+            {
+                if (i == j)
                 {
-                    int index = (int)(p / 100.0 * (sortedErrors.Count - 1));
-                    LogMessage($"{p}th percentile: {sortedErrors[index]:E6}");
+                    row.Add(diagonalElement.ToString("F2")); // Диагональный элемент
+                }
+                else
+                {
+                    double value = random.NextDouble() * 5; // Недиагональные элементы от 0 до 5
+                    row.Add(value.ToString("F2"));
                 }
             }
+            _matrixData.Add(row);
 
-            MessageBox.Show($"Comparison completed!\n" +
-                           $"Linear time: {result.LinearTime}ms\n" +
-                           $"Distributed time: {result.DistributedTime}ms\n" +
-                           $"Speedup: {result.Speedup:F2}x\n" +
-                           $"Solutions match: {result.SolutionsMatch}",
-                "Comparison Results", MessageBoxButton.OK, MessageBoxImage.Information);
+            // Генерация свободных членов
+            double freeTerm = random.NextDouble() * 100; // Свободные члены от 0 до 100
+            _freeTermsData.Add(freeTerm.ToString("F2"));
         }
-        catch (Exception ex)
-        {
-            LogMessage($"Error during comparison: {ex.Message}");
-            MessageBox.Show($"Error during comparison: {ex.Message}",
-                "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-        finally
-        {
-            CompareButton.IsEnabled = true;
-            ProgressBar.IsIndeterminate = false;
-        }
-    }
-    private void Clear_Click(object sender, RoutedEventArgs e)
-    {
-        currentMatrix = null;
-        solution = null;
-        matrixData.Clear();
-        solutionData.Clear();
-        LogTextBox.Clear();
-        ProgressBar.Value = 0;
-        UpdateUIState();
-    }
 
-    private void DisplayMatrix()
-    {
-        matrixData.Clear();
-        if (currentMatrix == null) return;
-
-        // Ограничиваем отображение для больших матриц
-        int displaySize = Math.Min(currentMatrix.Size, 20);
-        for (int i = 0; i < displaySize; i++)
+        // Обновляем размеры столбцов в MatrixGrid
+        MatrixGrid.Columns.Clear();
+        for (int i = 0; i < size; i++)
         {
-            var row = new MatrixRow { Index = i };
-            for (int j = 0; j < displaySize; j++)
+            var column = new DataGridTextColumn
             {
-                row.Values.Add(currentMatrix[i, j]);
-            }
-            row.Constant = currentMatrix.GetConstant(i);
-            matrixData.Add(row);
+                Header = $"X{i + 1}",
+                Binding = new System.Windows.Data.Binding($"[{i}]"),
+                Width = new DataGridLength(1, DataGridLengthUnitType.Star)
+            };
+            MatrixGrid.Columns.Add(column);
         }
 
-        if (currentMatrix.Size > displaySize)
+        // Обновляем столбец свободных членов
+        FreeTermsGrid.Columns.Clear();
+        FreeTermsGrid.Columns.Add(new DataGridTextColumn
         {
-            LogMessage($"Note: Displaying only first {displaySize}x{displaySize} elements of {currentMatrix.Size}x{currentMatrix.Size} matrix");
-        }
+            Header = "B",
+            Binding = new System.Windows.Data.Binding(),
+            Width = new DataGridLength(1, DataGridLengthUnitType.Star)
+        });
+
+        UpdateMatrixDisplay();
     }
 
-    private void DisplaySolution()
+    private void UpdateMatrixDisplay()
     {
-        solutionData.Clear();
-        if (solution == null) return;
+        // Обновляем высоту строк
+        MatrixGrid.RowHeight = 25;
+        FreeTermsGrid.RowHeight = 25;
 
-        // Добавляем все решения в таблицу
-        for (int i = 0; i < solution.Size; i++)
+        // Добавляем номера строк
+        MatrixGrid.RowHeaderWidth = 50;
+        FreeTermsGrid.RowHeaderWidth = 50;
+
+        for (int i = 0; i < _matrixData.Count; i++)
         {
-            solutionData.Add(new SolutionRow
+            if (MatrixGrid.Items.Count > i)
             {
-                Index = i + 1,
-                Value = solution.GetConstant(i)
-            });
-        }
-
-        LogMessage("\nSolution values (first 10):");
-        for (int i = 0; i < Math.Min(10, solution.Size); i++)
-        {
-            LogMessage($"x[{i + 1}] = {solution.GetConstant(i):F6}");
-        }
-    }
-
-    private void LogMessage(string message)
-    {
-        string timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
-        LogTextBox.AppendText($"[{timestamp}] {message}\n");
-        LogTextBox.ScrollToEnd();
-    }
-
-    private void UpdateUIState()
-    {
-        bool canInteract = !isSolving;
-        HostTextBox.IsEnabled = canInteract;
-        PortTextBox.IsEnabled = canInteract;
-        MatrixSizeTextBox.IsEnabled = canInteract;
-        // Изменим условие для кнопки Solve
-        SolveButton.IsEnabled = canInteract && currentMatrix != null;
-        GenerateMatrix.IsEnabled = canInteract;
-        ClearButton.IsEnabled = canInteract;
-
-        // Добавим отладочный вывод
-        Console.WriteLine($"UpdateUIState: isSolving={isSolving}, currentMatrix is {(currentMatrix == null ? "null" : "not null")}");
-        Console.WriteLine($"SolveButton.IsEnabled = {SolveButton.IsEnabled}");
-    }
-
-    private void StatusTimer_Tick(object sender, EventArgs e)
-    {
-        if (!isSolving)
-        {
-            ProgressBar.Value = 0;
-            return;
-        }
-
-        ProgressBar.Value = (ProgressBar.Value + 1) % 100;
-    }
-
-    protected override void OnClosing(CancelEventArgs e)
-    {
-        if (isSolving)
-        {
-            var result = MessageBox.Show(
-                "Solution is in progress. Are you sure you want to exit?",
-                "Confirm Exit",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning);
-
-            if (result == MessageBoxResult.No)
-            {
-                e.Cancel = true;
-                return;
+                var row = MatrixGrid.Items[i];
+                if (row != null)
+                {
+                    MatrixGrid.RowHeaderTemplate = new DataTemplate();
+                    var headerText = new FrameworkElementFactory(typeof(TextBlock));
+                    headerText.SetValue(TextBlock.TextProperty, (i + 1).ToString());
+                    headerText.SetValue(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center);
+                    headerText.SetValue(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+                    MatrixGrid.RowHeaderTemplate.VisualTree = headerText;
+                }
             }
         }
+    }
 
-        statusTimer.Stop();
+    private void DisplayResults(double[] solution, string stats)
+    {
+        var resultBuilder = new StringBuilder("Решение:\n");
+        for (int i = 0; i < solution.Length; i++)
+        {
+            resultBuilder.AppendLine($"x{i + 1} = {solution[i]:F6}");
+        }
+        ResultTextBox.Text = resultBuilder.ToString();
+        StatsTextBox.Text = stats;
+    }
+
+    private Matrix CreateMatrixFromGrids()
+    {
+        int size = _matrixData.Count;
+        var matrix = new Matrix(size, size);
+
+        for (int i = 0; i < size; i++)
+        {
+            for (int j = 0; j < size; j++)
+            {
+                if (!double.TryParse(_matrixData[i][j], NumberStyles.Any, CultureInfo.InvariantCulture, out double value))
+                {
+                    throw new FormatException($"Некорректное значение в ячейке [{i},{j}]");
+                }
+                matrix[i, j] = value;
+            }
+
+            if (!double.TryParse(_freeTermsData[i], NumberStyles.Any, CultureInfo.InvariantCulture, out double freeTerm))
+            {
+                throw new FormatException($"Некорректное значение свободного члена в строке {i}");
+            }
+            matrix.SetFreeTerm(i, freeTerm);
+        }
+
+        return matrix;
+    }
+
+    private async Task LoadMatrixFromFile(string filename)
+    {
+        var lines = await File.ReadAllLinesAsync(filename);
+        if (!int.TryParse(lines[0], out int size))
+        {
+            throw new FormatException("Некорректный формат файла");
+        }
+
+        _matrixData.Clear();
+        _freeTermsData.Clear();
+
+        for (int i = 0; i < size; i++)
+        {
+            var values = lines[i + 1].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var row = new ObservableCollection<string>(values.Take(size));
+            _matrixData.Add(row);
+            _freeTermsData.Add(values[size]);
+        }
+    }
+
+    private async Task SaveMatrixToFile(string filename)
+    {
+        using var writer = new StreamWriter(filename);
+        await writer.WriteLineAsync(_matrixData.Count.ToString());
+
+        for (int i = 0; i < _matrixData.Count; i++)
+        {
+            var row = string.Join(" ", _matrixData[i]);
+            await writer.WriteLineAsync($"{row} {_freeTermsData[i]}");
+        }
+    }
+
+    private void SetControlsEnabled(bool enabled)
+    {
+        InitNodesButton.IsEnabled = enabled;
+        NodesCountTextBox.IsEnabled = enabled;
+        GenerateButton.IsEnabled = enabled;
+        LoadButton.IsEnabled = enabled;
+        SaveButton.IsEnabled = enabled;
+        SolveButton.IsEnabled = enabled;
+        ClearButton.IsEnabled = enabled;
+        MatrixGrid.IsEnabled = enabled;
+        FreeTermsGrid.IsEnabled = enabled;
+        MatrixSizeTextBox.IsEnabled = enabled;
+    }
+
+    private bool ValidateMatrixData()
+    {
+        if (_matrixData.Count == 0 || _freeTermsData.Count == 0)
+        {
+            MessageBox.Show("Матрица пуста", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
+        }
+
+        if (_matrixData.Count != _freeTermsData.Count)
+        {
+            MessageBox.Show("Количество строк матрицы не совпадает с количеством свободных членов",
+                "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
+        }
+
+        foreach (var row in _matrixData)
+        {
+            if (row.Count != _matrixData.Count)
+            {
+                MessageBox.Show("Матрица не является квадратной",
+                    "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                return false;
+            }
+
+            foreach (var cell in row)
+            {
+                if (!double.TryParse(cell, NumberStyles.Any, CultureInfo.InvariantCulture, out _))
+                {
+                    MessageBox.Show("Матрица содержит некорректные значения",
+                        "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return false;
+                }
+            }
+        }
+
+        foreach (var term in _freeTermsData)
+        {
+            if (!double.TryParse(term, NumberStyles.Any, CultureInfo.InvariantCulture, out _))
+            {
+                MessageBox.Show("Вектор свободных членов содержит некорректные значения",
+                    "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        _client.Dispose();
         base.OnClosing(e);
     }
-}
-
-public class MatrixRow
-{
-    public int Index { get; set; }
-    public ObservableCollection<double> Values { get; set; } = new ObservableCollection<double>();
-    public double Constant { get; set; }
-}
-
-public class SolutionRow
-{
-    public int Index { get; set; }
-    public double Value { get; set; }
 }

@@ -1,20 +1,22 @@
 ﻿using System.Windows;
 
-namespace SLAU.Client;
-public partial class App : Application
+namespace SLAU.Client
 {
-    protected override void OnStartup(StartupEventArgs e)
+    public partial class App : Application
     {
-        base.OnStartup(e);
-
-        // Глобальная обработка необработанных исключений
-        Current.DispatcherUnhandledException += (s, args) =>
+        protected override void OnStartup(StartupEventArgs e)
         {
-            MessageBox.Show($"An unexpected error occurred:\n{args.Exception.Message}",
-                "Error",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-            args.Handled = true;
-        };
+            base.OnStartup(e);
+
+            // Глобальная обработка необработанных исключений
+            Current.DispatcherUnhandledException += (s, args) =>
+            {
+                MessageBox.Show($"Произошла непредвиденная ошибка: {args.Exception.Message}",
+                    "Ошибка",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                args.Handled = true;
+            };
+        }
     }
 }

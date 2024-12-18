@@ -1,36 +1,77 @@
-﻿using System;
-using System.Threading.Tasks;
+﻿using SLAU.Common.Logging;
+using System.Net;
+using System.Net.Sockets;
 
 namespace SLAU.ComputeNode;
 class Program
 {
     static async Task Main(string[] args)
     {
+        var logger = new ConsoleLogger();
+
         try
         {
-            if (args.Length == 0 || !int.TryParse(args[0], out int port))
+            if (args.Length < 1)
             {
-                Console.WriteLine("Port not specified or invalid");
+                logger.LogError("Port number is required");
                 return;
             }
 
-            Console.Title = $"Compute Node (Port: {port})";
-            var node = new ComputeNode(port);
-            Console.WriteLine($"Starting compute node on port {port}...");
-
-            Console.CancelKeyPress += (sender, e) =>
+            if (!int.TryParse(args[0], out int port))
             {
-                e.Cancel = true;
-                node.Stop();
-            };
+                logger.LogError("Invalid port number");
+                return;
+            }
 
-            await node.StartAsync();
+            logger.LogInfo($"Starting compute node on port {port}");
+            var tcpListener = new TcpListener(IPAddress.Any, port);
+
+            try
+            {
+                tcpListener.Start();
+                logger.LogInfo($"Compute node is listening on port {port}");
+
+                while (true)
+                {
+                    var client = await tcpListener.AcceptTcpClientAsync();
+                    logger.LogInfo($"Accepted connection from {client.Client.RemoteEndPoint}");
+
+                    _ = HandleClientAsync(client, logger).ContinueWith(t =>
+                    {
+                        if (t.IsFaulted)
+                        {
+                            logger.LogError($"Error handling client: {t.Exception}");
+                        }
+                    });
+                }
+            }
+            finally
+            {
+                tcpListener.Stop();
+                logger.LogInfo("Compute node stopped");
+            }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Critical error: {ex.Message}");
-            Console.WriteLine("Press any key to exit...");
-            Console.ReadKey();
+            logger.LogError($"Fatal error: {ex.Message}");
+            Environment.Exit(1);
+        }
+    }
+
+    static async Task HandleClientAsync(TcpClient client, ILogger logger)
+    {
+        try
+        {
+            using var node = new ComputeNode(client, logger);
+            await node.ProcessRequestsAsync();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError($"Error handling client: {ex.Message}");
+        }
+        finally
+        {
+            client.Dispose();
         }
     }
 }
